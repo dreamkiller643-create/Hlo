@@ -1,0 +1,161 @@
+import requests
+import time
+from datetime import datetime, timedelta, timezone
+from threading import Thread
+from flask import Flask
+
+# ================= CONFIG =================
+
+API_KEY = "15189eebbbae89f2e26e0e1cbe43cf5c"
+
+BOT_TOKEN = "8341652276:AAF0MM-8PMaEUjcrgRh_nE68riYSj3e-ZaA"
+CHAT_ID = "8006964769"
+
+SPORTS = [
+    "soccer_epl",
+    "soccer_spain_la_liga",
+    "soccer_germany_bundesliga",
+    "basketball_nba",
+    "americanfootball_nfl"
+]
+
+# Only use bookies that work for you
+ALLOWED_BOOKMAKERS = [
+    "1xBet",
+    "Parimatch",
+    "Stake",
+    "Melbet"
+]
+
+params = {
+    "apiKey": API_KEY,
+    "regions": "eu",
+    "markets": "h2h",
+    "oddsFormat": "decimal"
+}
+
+# ================= TELEGRAM =================
+
+def send_telegram(message):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    data = {
+        "chat_id": CHAT_ID,
+        "text": message
+    }
+    try:
+        requests.post(url, data=data)
+    except:
+        print("Telegram error")
+
+# ================= FLASK (KEEP ALIVE) =================
+
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Bot is running ✅"
+
+def keep_alive():
+    app.run(host="0.0.0.0", port=10000)
+
+# ================= SCANNER =================
+
+def scanner():
+    send_telegram("🚀 Bot started and scanning!")
+
+    while True:
+        all_data = []
+
+        # 🔄 Fetch multiple sports
+        for sport in SPORTS:
+            url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds"
+            try:
+                response = requests.get(url, params=params)
+                if response.status_code == 200:
+                    data = response.json()
+                    all_data.extend(data)
+            except:
+                continue
+
+        print("\nTOTAL MATCHES SCANNED:", len(all_data))
+
+        now = datetime.now(timezone.utc)
+        time_limit = now + timedelta(hours=72)
+
+        for match in all_data:
+            pin_odds = None
+
+            home = match.get('home_team', 'Unknown')
+            away = match.get('away_team', 'Unknown')
+
+            # ⏰ Skip far matches
+            match_time = datetime.fromisoformat(
+                match['commence_time'].replace("Z", "+00:00")
+            )
+            if match_time > time_limit:
+                continue
+
+            # 🔍 Find Pinnacle odds
+            for bookmaker in match.get('bookmakers', []):
+                if bookmaker.get('title') == "Pinnacle":
+                    pin_odds = bookmaker['markets'][0]['outcomes']
+
+            if not pin_odds:
+                continue
+
+            # 📊 Remove margin
+            total_prob = sum([1/o['price'] for o in pin_odds])
+
+            for i in range(len(pin_odds)):
+                pin_price = pin_odds[i]['price']
+                true_prob = (1/pin_price) / total_prob
+
+                best_price = 0
+                best_book = ""
+
+                # 🔍 Find best odds
+                for bookmaker in match.get('bookmakers', []):
+                    name = bookmaker.get('title')
+
+                    if name == "Pinnacle":
+                        continue
+
+                    if name not in ALLOWED_BOOKMAKERS:
+                        continue
+
+                    outcomes = bookmaker['markets'][0]['outcomes']
+                    price = outcomes[i]['price']
+
+                    if price > best_price:
+                        best_price = price
+                        best_book = name
+
+                if best_price == 0:
+                    continue
+
+                # 💰 EDGE CALCULATION
+                edge = (best_price * true_prob) - 1
+
+                if edge > 0.001:  # 1% edge
+                    message = f"""
+🔥 VALUE BET
+
+🏟 {home} vs {away}
+🎯 {pin_odds[i]['name']}
+
+📊 Pinnacle: {pin_price}
+💰 Odds: {best_price} ({best_book})
+
+📈 Edge: {round(edge*100,2)}%
+"""
+                    print(message)
+                    send_telegram(message)
+
+        print("\n⏳ Waiting for next scan...\n")
+        time.sleep(60)
+
+# ================= RUN =================
+
+if __name__ == "__main__":
+    Thread(target=scanner).start()
+    keep_alive()
