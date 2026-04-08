@@ -64,80 +64,76 @@ def scanner():
     send_telegram("🚀 Bot started and scanning!")
 
     while True:
-        all_data = []
+        try:
+            all_data = []
 
-        # 🔄 Fetch multiple sports
-        for sport in SPORTS:
-            url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds"
-            try:
+            for sport in SPORTS:
+                url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds"
                 response = requests.get(url, params=params)
+
+                print(f"Fetching: {sport} | Status: {response.status_code}", flush=True)
+
                 if response.status_code == 200:
                     data = response.json()
                     all_data.extend(data)
-            except:
-                continue
 
-        print("\nTOTAL MATCHES SCANNED:", len(all_data))
+            print("\nTOTAL MATCHES SCANNED:", len(all_data), flush=True)
 
-        now = datetime.now(timezone.utc)
-        time_limit = now + timedelta(hours=72)
+            now = datetime.now(timezone.utc)
+            time_limit = now + timedelta(hours=72)
 
-        for match in all_data:
-            pin_odds = None
+            for match in all_data:
+                pin_odds = None
 
-            home = match.get('home_team', 'Unknown')
-            away = match.get('away_team', 'Unknown')
+                home = match.get('home_team', 'Unknown')
+                away = match.get('away_team', 'Unknown')
 
-            # ⏰ Skip far matches
-            match_time = datetime.fromisoformat(
-                match['commence_time'].replace("Z", "+00:00")
-            )
-            if match_time > time_limit:
-                continue
+                match_time = datetime.fromisoformat(
+                    match['commence_time'].replace("Z", "+00:00")
+                )
 
-            # 🔍 Find Pinnacle odds
-            for bookmaker in match.get('bookmakers', []):
-                if bookmaker.get('title') == "Pinnacle":
-                    pin_odds = bookmaker['markets'][0]['outcomes']
-
-            if not pin_odds:
-                continue
-
-            # 📊 Remove margin
-            total_prob = sum([1/o['price'] for o in pin_odds])
-
-            for i in range(len(pin_odds)):
-                pin_price = pin_odds[i]['price']
-                true_prob = (1/pin_price) / total_prob
-
-                best_price = 0
-                best_book = ""
-
-                # 🔍 Find best odds
-                for bookmaker in match.get('bookmakers', []):
-                    name = bookmaker.get('title')
-
-                    if name == "Pinnacle":
-                        continue
-
-                    if name not in ALLOWED_BOOKMAKERS:
-                        continue
-
-                    outcomes = bookmaker['markets'][0]['outcomes']
-                    price = outcomes[i]['price']
-
-                    if price > best_price:
-                        best_price = price
-                        best_book = name
-
-                if best_price == 0:
+                if match_time > time_limit:
                     continue
 
-                # 💰 EDGE CALCULATION
-                edge = (best_price * true_prob) - 1
+                for bookmaker in match.get('bookmakers', []):
+                    if bookmaker.get('title') == "Pinnacle":
+                        pin_odds = bookmaker['markets'][0]['outcomes']
 
-                if edge > 0.001:  # 1% edge
-                    message = f"""
+                if not pin_odds:
+                    continue
+
+                total_prob = sum([1/o['price'] for o in pin_odds])
+
+                for i in range(len(pin_odds)):
+                    pin_price = pin_odds[i]['price']
+                    true_prob = (1/pin_price) / total_prob
+
+                    best_price = 0
+                    best_book = ""
+
+                    for bookmaker in match.get('bookmakers', []):
+                        name = bookmaker.get('title')
+
+                        if name == "Pinnacle":
+                            continue
+
+                        if name not in ALLOWED_BOOKMAKERS:
+                            continue
+
+                        outcomes = bookmaker['markets'][0]['outcomes']
+                        price = outcomes[i]['price']
+
+                        if price > best_price:
+                            best_price = price
+                            best_book = name
+
+                    if best_price == 0:
+                        continue
+
+                    edge = (best_price * true_prob) - 1
+
+                    if edge > 0.01:
+                        message = f"""
 🔥 VALUE BET
 
 🏟 {home} vs {away}
@@ -148,11 +144,16 @@ def scanner():
 
 📈 Edge: {round(edge*100,2)}%
 """
-                    print(message)
-                    send_telegram(message)
+                        print(message, flush=True)
+                        send_telegram(message)
 
-        print("\n⏳ Waiting for next scan...\n")
-        time.sleep(60)
+            print("\n⏳ Waiting for next scan...\n", flush=True)
+            time.sleep(60)
+
+        except Exception as e:
+            print("ERROR:", e, flush=True)
+            send_telegram(f"❌ Error: {e}")
+            time.sleep(60)
 
 # ================= RUN =================
 
