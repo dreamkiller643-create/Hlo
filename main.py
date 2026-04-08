@@ -132,7 +132,7 @@ def scanner():
 
                     edge = (best_price * true_prob) - 1
 
-                    if edge > 0.01:
+                    if edge > 0.001:
                         message = f"""
 🔥 VALUE BET
 
@@ -148,7 +148,7 @@ def scanner():
                         send_telegram(message)
 
             print("\n⏳ Waiting for next scan...\n", flush=True)
-            time.sleep(60)
+            time.sleep(20)
 
         except Exception as e:
             print("ERROR:", e, flush=True)
