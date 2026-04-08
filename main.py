@@ -12,11 +12,17 @@ BOT_TOKEN = "8341652276:AAF0MM-8PMaEUjcrgRh_nE68riYSj3e-ZaA"
 CHAT_ID = "8006964769"
 
 SPORTS = [
-    "soccer_epl",
-    "soccer_spain_la_liga",
-    "soccer_germany_bundesliga",
-    "basketball_nba",
-    "americanfootball_nfl"
+    "soccer_poland_ekstraklasa",
+    "soccer_czech_republic_1_liga",
+    "soccer_brazil_serie_b",
+    "soccer_sweden_allsvenskan",
+    "soccer_norway_eliteserien",
+    "soccer_denmark_superliga",
+    "soccer_austria_bundesliga",
+    "soccer_switzerland_superleague",
+    "soccer_belgium_first_div",
+    "soccer_portugal_primeira_liga",
+    "soccer_greece_super_league"
 ]
 
 # Only use bookies that work for you
@@ -24,7 +30,9 @@ ALLOWED_BOOKMAKERS = [
     "1xBet",
     "Parimatch",
     "Stake",
-    "Melbet"
+    "Melbet",
+    "4rabet",
+    "1Win"
 ]
 
 params = {
