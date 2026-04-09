@@ -1,14 +1,9 @@
 import requests
 import time
-from datetime import datetime, timedelta, timezone
-from threading import Thread
-from flask import Flask
 
 # ================= CONFIG =================
-
 API_KEY = "15189eebbbae89f2e26e0e1cbe43cf5c"
-
-BOT_TOKEN = "8341652276:AAF0MM-8PMaEUjcrgRh_nE68riYSj3e-ZaA"
+TELEGRAM_TOKEN = "8341652276:AAF0MM-8PMaEUjcrgRh_nE68riYSj3e-ZaA"
 CHAT_ID = "8006964769"
 
 SPORTS = [
@@ -25,146 +20,120 @@ SPORTS = [
     "soccer_greece_super_league"
 ]
 
-# Only use bookies that work for you
-ALLOWED_BOOKMAKERS = [
-    "1xBet",
+ALLOWED_BOOKIES = ["1xBet",
     "Parimatch",
     "Stake",
     "Melbet",
     "4rabet",
-    "1Win"
-]
+    "1Win"]
 
-params = {
-    "apiKey": API_KEY,
-    "regions": "eu",
-    "markets": "h2h",
-    "oddsFormat": "decimal"
-}
+EDGE_THRESHOLD = 0.001  # 2% edge
 
-# ================= TELEGRAM =================
+# ==========================================
 
-def send_telegram(message):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {
-        "chat_id": CHAT_ID,
-        "text": message
-    }
-    try:
-        requests.post(url, data=data)
-    except:
-        print("Telegram error")
+def send_telegram(msg):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
 
-# ================= FLASK (KEEP ALIVE) =================
 
-app = Flask(__name__)
+print("🚀 BOT STARTED...")
 
-@app.route("/")
-def home():
-    return "Bot is running ✅"
+while True:
+    print("\n🔄 Scanning...")
 
-def keep_alive():
-    app.run(host="0.0.0.0", port=10000)
+    all_matches = []
 
-# ================= SCANNER =================
+    # ===== FETCH DATA =====
+    for sport in SPORTS:
+        url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds/?apiKey={API_KEY}&regions=eu&markets=h2h"
 
-def scanner():
-    send_telegram("🚀 Bot started and scanning!")
-
-    while True:
         try:
-            all_data = []
+            res = requests.get(url)
 
-            for sport in SPORTS:
-                url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds"
-                response = requests.get(url, params=params)
+            if res.status_code != 200:
+                print(f"❌ Error {res.status_code} for {sport}")
+                continue
 
-                print(f"Fetching: {sport} | Status: {response.status_code}", flush=True)
+            data = res.json()
+            print(f"✅ {sport}: {len(data)} matches")
 
-                if response.status_code == 200:
-                    data = response.json()
-                    all_data.extend(data)
+            all_matches.extend(data)
 
-            print("\nTOTAL MATCHES SCANNED:", len(all_data), flush=True)
+        except Exception as e:
+            print(f"❌ Fetch error: {e}")
 
-            now = datetime.now(timezone.utc)
-            time_limit = now + timedelta(hours=72)
+    print("📊 TOTAL MATCHES SCANNED:", len(all_matches))
 
-            for match in all_data:
-                pin_odds = None
+    # ===== VALUE BET LOGIC =====
+    value_found = False
 
-                home = match.get('home_team', 'Unknown')
-                away = match.get('away_team', 'Unknown')
+    for match in all_matches:
+        home = match.get("home_team", "")
+        away = match.get("away_team", "")
+        match_name = f"{home} vs {away}"
 
-                match_time = datetime.fromisoformat(
-                    match['commence_time'].replace("Z", "+00:00")
-                )
+        bookmakers = match.get("bookmakers", [])
 
-                if match_time > time_limit:
+        pin_odds = None
+        best_odds = None
+        best_bookmaker = None
+
+        for book in bookmakers:
+            title = book.get("title", "").lower()
+
+            if not any(b in title for b in ALLOWED_BOOKIES) and "pinnacle" not in title:
+                continue
+
+            # Find Pinnacle
+            if "pinnacle" in title:
+                pin_odds = book["markets"][0]["outcomes"]
+
+            # Find best odds from others
+            for outcome in book["markets"][0]["outcomes"]:
+                if not best_odds or outcome["price"] > best_odds:
+                    best_odds = outcome["price"]
+                    best_bookmaker = book.get("title")
+
+        # Skip if no Pinnacle
+        if not pin_odds or not best_odds:
+            continue
+
+        # Compare each selection
+        for outcome in pin_odds:
+            name = outcome["name"]
+            pin_price = outcome["price"]
+
+            # find same selection in other books
+            for book in bookmakers:
+                if "pinnacle" in book.get("title", "").lower():
                     continue
 
-                for bookmaker in match.get('bookmakers', []):
-                    if bookmaker.get('title') == "Pinnacle":
-                        pin_odds = bookmaker['markets'][0]['outcomes']
+                for out in book["markets"][0]["outcomes"]:
+                    if out["name"] == name:
+                        other_price = out["price"]
 
-                if not pin_odds:
-                    continue
+                        true_prob = 1 / pin_price
+                        edge = (other_price * true_prob) - 1
 
-                total_prob = sum([1/o['price'] for o in pin_odds])
+                        if edge > EDGE_THRESHOLD:
+                            value_found = True
 
-                for i in range(len(pin_odds)):
-                    pin_price = pin_odds[i]['price']
-                    true_prob = (1/pin_price) / total_prob
+                            msg = f"""
+🔥 VALUE BET FOUND!
 
-                    best_price = 0
-                    best_book = ""
-
-                    for bookmaker in match.get('bookmakers', []):
-                        name = bookmaker.get('title')
-
-                        if name == "Pinnacle":
-                            continue
-
-                        if name not in ALLOWED_BOOKMAKERS:
-                            continue
-
-                        outcomes = bookmaker['markets'][0]['outcomes']
-                        price = outcomes[i]['price']
-
-                        if price > best_price:
-                            best_price = price
-                            best_book = name
-
-                    if best_price == 0:
-                        continue
-
-                    edge = (best_price * true_prob) - 1
-
-                    if edge > 0.001:
-                        message = f"""
-🔥 VALUE BET
-
-🏟 {home} vs {away}
-🎯 {pin_odds[i]['name']}
+🏟 Match: {match_name}
+🎯 Selection: {name}
 
 📊 Pinnacle: {pin_price}
-💰 Odds: {best_price} ({best_book})
+💰 Other: {other_price} ({book.get('title')})
 
 📈 Edge: {round(edge*100,2)}%
 """
-                        print(message, flush=True)
-                        send_telegram(message)
+                            print(msg)
+                            send_telegram(msg)
 
-            print("\n⏳ Waiting for next scan...\n", flush=True)
-            time.sleep(20)
+    if not value_found:
+        print("❌ No value bets found")
 
-        except Exception as e:
-            print("ERROR:", e, flush=True)
-            send_telegram(f"❌ Error: {e}")
-            time.sleep(60)
-
-# ================= RUN =================
-
-if __name__ == "__main__":
-    Thread(target=scanner).start()
-    keep_alive()
+    print("⏳ Waiting for next scan...\n")
+    time.sleep(60)
